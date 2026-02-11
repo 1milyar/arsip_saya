@@ -3,7 +3,7 @@
   <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-search text-primary"></i> Cari & Kelola Arsip</h2>
   </div>
-
+  
   <div class="card card-custom p-4 mb-4 shadow-sm border-0">
     <div class="row g-2 mb-3">
       <div class="col-md-2">
@@ -40,6 +40,7 @@
         </select>
       </div>
     </div>
+    
     <div class="d-flex gap-2">
       <button class="btn btn-primary px-4" onclick="performSearch()">
         <i class="bi bi-search"></i> Cari
@@ -52,11 +53,15 @@
       </button>
     </div>
   </div>
-
+  
   <div id="searchResults" class="mt-4">
+    <!-- ✅ FIX: Placeholder dengan tombol Tampilkan Semua -->
     <div class="text-center text-muted py-5">
       <i class="bi bi-search fs-1 d-block mb-3"></i>
-      Tidak ada data ditemukan
+      <p class="mb-2">Klik "Tampilkan Semua" untuk melihat data arsip</p>
+      <button class="btn btn-primary" onclick="loadAllArsip()">
+        <i class="bi bi-card-list"></i> Tampilkan Semua
+      </button>
     </div>
   </div>
 </section>
