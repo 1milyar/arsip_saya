@@ -1,0 +1,48 @@
+<!-- Sidebar -->
+<div class="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-logo"><i class="bi bi-folder-check"></i> SPJ DIGITAL</div>
+    <small class="text-muted">Archive Management</small>
+  </div>
+
+  <nav class="mt-4">
+    <a href="#" class="nav-link active" data-section="dashboard">
+      <i class="bi bi-speedometer2"></i> Dashboard
+    </a>
+    <a href="#" class="nav-link" data-section="search">
+      <i class="bi bi-search"></i> Cari Arsip
+    </a>
+    <a href="#" class="nav-link admin-only" data-section="upload">
+      <i class="bi bi-cloud-arrow-up"></i> Upload SPJ
+    </a>
+    <a href="#" class="nav-link admin-only" data-section="anggaran">
+      <i class="bi bi-wallet2"></i> Kelola Anggaran
+    </a>
+    <a href="#" class="nav-link" data-section="realisasi">
+      <i class="bi bi-graph-up-arrow"></i> Laporan Realisasi
+    </a>
+    <a href="#" class="nav-link" data-section="rekapPajak">
+      <i class="bi bi-receipt"></i> Rekapitulasi Pajak
+    </a>
+  </nav>
+
+  <div class="user-profile">
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <div id="userAvatar" class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center"
+        style="width: 40px; height: 40px; font-weight: bold;">U</div>
+      <div>
+        <div id="userName" class="fw-bold" style="font-size: 14px; line-height: 1;">User</div>
+        <div class="d-flex gap-1 mt-1">
+          <span id="userRoleBadge" class="badge bg-success" style="font-size: 10px;">Role</span>
+          <span id="userBidangBadge" class="badge bg-info text-dark" style="font-size: 10px;">Bidang</span>
+        </div>
+      </div>
+    </div>
+    <div class="small mb-3 text-white-50">
+      <i class="bi bi-clock-history"></i> Session: <span id="sessionMinutes">60</span>m
+    </div>
+    <button id="btnLogout" class="btn btn-outline-danger btn-sm w-100">
+      <i class="bi bi-power"></i> Logout
+    </button>
+  </div>
+</div>

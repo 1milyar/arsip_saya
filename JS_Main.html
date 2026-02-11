@@ -1,0 +1,1398 @@
+<script>
+  // Global variables
+  let currentUser = null;
+  let sessionToken = null;
+  let sessionTimer = null;
+  let kodeBagianData = [];
+
+  // Initialize on page load
+  document.addEventListener('DOMContentLoaded', function () {
+    // Setup login form
+    document.getElementById('loginForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      handleLogin();
+    });
+
+    // Setup logout button
+    document.getElementById('btnLogout').addEventListener('click', function () {
+      handleLogout();
+    });
+
+    // Setup navigation
+    document.querySelectorAll('[data-section]').forEach(link => {
+      link.addEventListener('click', function (e) {
+        e.preventDefault();
+        const sectionId = this.getAttribute('data-section');
+        showSection(sectionId);
+      });
+    });
+
+    // Setup upload form
+    document.getElementById('uploadForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      handleUploadSPJ();
+    });
+
+    // Setup dynamic form listeners
+    document.getElementById('tahunAnggaran').addEventListener('change', loadKodeUtama);
+    document.getElementById('bidang').addEventListener('change', loadKodeUtama);
+    document.getElementById('kodeUtama').addEventListener('change', loadKodeBagian);
+    document.getElementById('kodeBagian').addEventListener('change', loadUraianDanSisaPagu);
+    document.getElementById('nominal').addEventListener('input', checkPaguValidation);
+
+    // Auto-refresh session timer every minute
+    setInterval(updateSessionTimer, 60000);
+  });
+
+  // INITIALIZATION FUNCTIONS
+  function loadDynamicSelects() {
+    showLoading('Inisialisasi...', 'Memuat data dropdown');
+
+    // Load Tahun
+    google.script.run
+      .withSuccessHandler(function (tahunList) {
+        const select = document.getElementById('tahunAnggaran');
+        const searchSelect = document.getElementById('searchTahun');
+
+        select.innerHTML = '<option value="">Pilih Tahun Anggaran</option>';
+        if (searchSelect) searchSelect.innerHTML = '<option value="">Semua Tahun</option>';
+
+        tahunList.forEach(tahun => {
+          const opt = `<option value="${tahun}">${tahun}</option>`;
+          select.innerHTML += opt;
+          if (searchSelect) searchSelect.innerHTML += opt;
+        });
+
+        // Load Bidang
+        google.script.run
+          .withSuccessHandler(function (bidangList) {
+            hideLoading();
+            const bSelect = document.getElementById('bidang');
+            const sbSelect = document.getElementById('searchBidang');
+
+            bSelect.innerHTML = '<option value="">Pilih Bidang</option>';
+            if (sbSelect) sbSelect.innerHTML = '<option value="ALL">Semua Bidang</option>';
+
+            bidangList.forEach(bidang => {
+              const opt = `<option value="${bidang}">${bidang}</option>`;
+              bSelect.innerHTML += opt;
+              if (sbSelect) sbSelect.innerHTML += opt;
+            });
+
+            // Re-apply current user bidang if not Admin
+            if (currentUser && currentUser.role !== 'Admin' && currentUser.bidang !== 'ALL') {
+              bSelect.value = currentUser.bidang;
+              bSelect.disabled = true;
+              if (sbSelect) {
+                sbSelect.value = currentUser.bidang;
+                sbSelect.disabled = true;
+              }
+            }
+          })
+          .getUniqueBidang(sessionToken);
+      })
+      .getUniqueTahun();
+  }
+
+  // LOGIN FUNCTIONS
+  function handleLogin() {
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+
+    showLoading('Memproses login...', 'Mengautentikasi pengguna');
+
+    google.script.run
+      .withSuccessHandler(function (response) {
+        hideLoading();
+        if (response.success) {
+          currentUser = {
+            nama: response.nama,
+            role: response.role,
+            bidang: response.bidang
+          };
+          sessionToken = response.sessionToken;
+
+          // Update UI
+          document.getElementById('userName').textContent = response.nama;
+          document.getElementById('userRoleBadge').textContent = response.role;
+          document.getElementById('userBidangBadge').textContent = response.bidang;
+          document.getElementById('userAvatar').textContent = response.nama.charAt(0);
+
+          // Apply RBAC
+          applyRBAC();
+
+          // Load dynamic selects
+          loadDynamicSelects();
+
+          // Start session timer
+          startSessionTimer();
+
+          // Switch to main app
+          document.getElementById('loginPage').style.display = 'none';
+          document.getElementById('mainApp').style.display = 'block';
+
+          showSuccess('Login berhasil! Selamat datang, ' + response.nama);
+        } else {
+          showError(response.message || 'Login gagal!');
+        }
+      })
+      .withFailureHandler(function (error) {
+        hideLoading();
+        showError('Terjadi kesalahan: ' + error.message);
+      })
+      .validateLogin(username, password);
+  }
+
+  function handleLogout() {
+    if (!sessionToken) {
+      // Already logged out
+      document.getElementById('mainApp').style.display = 'none';
+      document.getElementById('loginPage').style.display = 'block';
+      return;
+    }
+
+    showLoading('Logout...', 'Sedang keluar dari sistem');
+
+    google.script.run
+      .withSuccessHandler(function (response) {
+        hideLoading();
+
+        // Clear session
+        currentUser = null;
+        sessionToken = null;
+        if (sessionTimer) clearInterval(sessionTimer);
+
+        // Reset UI
+        document.getElementById('mainApp').style.display = 'none';
+        document.getElementById('loginPage').style.display = 'block';
+        document.getElementById('username').value = '';
+        document.getElementById('password').value = '';
+
+        showSuccess('Logout berhasil!');
+      })
+      .withFailureHandler(function (error) {
+        hideLoading();
+        showError('Error saat logout: ' + error.message);
+      })
+      .logout(sessionToken);
+  }
+
+  // RBAC FUNCTIONS
+  function applyRBAC() {
+    if (!currentUser) return;
+
+    const role = String(currentUser.role || "").trim().toLowerCase();
+    const isAdmin = role === 'admin';
+
+    console.log('Applying RBAC for role:', role, 'isAdmin:', isAdmin);
+
+    // Sidebar Visibility
+    document.querySelectorAll('.admin-only').forEach(el => {
+      isAdmin ? el.classList.remove('user-hidden') : el.classList.add('user-hidden');
+    });
+
+    // Bidang restricted areas
+    if (!isAdmin && currentUser.bidang !== 'ALL') {
+      const bidangSelect = document.getElementById('bidang');
+      if (bidangSelect) {
+        bidangSelect.value = currentUser.bidang;
+        bidangSelect.disabled = true;
+        bidangSelect.style.backgroundColor = '#e9ecef';
+      }
+
+      const searchBidang = document.getElementById('searchBidang');
+      if (searchBidang) {
+        searchBidang.value = currentUser.bidang;
+        searchBidang.disabled = true;
+      }
+    }
+
+    // Manage sections access message
+    const anggaranMsg = document.querySelector('#anggaranSection .alert-info');
+    if (anggaranMsg && isAdmin) {
+      anggaranMsg.style.display = 'none';
+    } else if (anggaranMsg) {
+      anggaranMsg.style.display = 'block';
+      anggaranMsg.textContent = 'Fitur kelola anggaran hanya untuk Admin. Akun Anda: ' + currentUser.role;
+    }
+  }
+
+  // SESSION MANAGEMENT
+  function startSessionTimer() {
+    let minutes = 60; // 1 hour
+    updateSessionDisplay(minutes);
+
+    sessionTimer = setInterval(() => {
+      minutes--;
+      updateSessionDisplay(minutes);
+
+      if (minutes <= 5) {
+        document.getElementById('sessionTimer').style.backgroundColor = '#ffc107';
+      }
+
+      if (minutes <= 0) {
+        clearInterval(sessionTimer);
+        handleLogout();
+        Swal.fire({
+          icon: 'warning',
+          title: 'Session Kadaluarsa',
+          text: 'Session Anda telah berakhir. Silakan login kembali.',
+          timer: 3000
+        });
+      }
+    }, 60000);
+  }
+
+  function updateSessionTimer() {
+    // Refresh session di server
+    if (sessionToken) {
+      google.script.run
+        .withSuccessHandler(function (response) {
+          if (response.valid) {
+            document.getElementById('sessionMinutes').textContent = response.remaining;
+          } else {
+            handleLogout();
+          }
+        })
+        .validateSession(sessionToken);
+    }
+  }
+
+  function updateSessionDisplay(minutes) {
+    document.getElementById('sessionMinutes').textContent = minutes;
+  }
+
+  // NAVIGATION FUNCTIONS
+  function showSection(sectionId) {
+    console.log('Showing section:', sectionId);
+
+    // Hide ALL sections explicitly using the app-section class
+    document.querySelectorAll('.app-section').forEach(el => {
+      el.classList.remove('active');
+    });
+
+    // Remove active from all nav links
+    document.querySelectorAll('.nav-link').forEach(link => {
+      link.classList.remove('active');
+    });
+
+    // Show selected section
+    const targetSection = document.getElementById(sectionId + 'Section');
+    if (targetSection) {
+      targetSection.classList.add('active');
+    } else {
+      console.error('Section element not found:', sectionId + 'Section');
+    }
+
+    // Add active to nav link
+    const activeLink = document.querySelector(`[data-section="${sectionId}"]`);
+    if (activeLink) activeLink.classList.add('active');
+
+    // Load section data if needed
+    if (sectionId === 'search') {
+      document.getElementById('searchResults').innerHTML = ''; // Clear old results
+      performSearch();
+    } else if (sectionId === 'dashboard') {
+      loadDashboard();
+    } else if (sectionId === 'anggaran') {
+      loadPaguList();
+    } else if (sectionId === 'realisasi') {
+      loadReportRealisasi();
+    } else if (sectionId === 'rekapPajak') {
+      loadReportPajak();
+    }
+  }
+
+  // UPLOAD SPJ FUNCTIONS
+  function loadKodeUtama() {
+    const tahun = document.getElementById('tahunAnggaran').value;
+    const bidang = document.getElementById('bidang').value;
+
+    if (!tahun || !bidang) return;
+
+    showLoading('Memuat data...', 'Mengambil kode rekening');
+
+    google.script.run
+      .withSuccessHandler(function (data) {
+        hideLoading();
+        const select = document.getElementById('kodeUtama');
+        select.innerHTML = '<option value="">Pilih Kode Rekening Utama</option>';
+
+        data.forEach(item => {
+          const option = document.createElement('option');
+          option.value = item.kodeUtama;
+          option.textContent = item.kodeUtama;
+          select.appendChild(option);
+        });
+      })
+      .withFailureHandler(function (error) {
+        hideLoading();
+        showError('Gagal memuat kode utama: ' + error.message);
+      })
+      .getAnggaranByTahunBidang(tahun, bidang);
+  }
+
+  function loadKodeBagian() {
+    const tahun = document.getElementById('tahunAnggaran').value;
+    const bidang = document.getElementById('bidang').value;
+    const kodeUtama = document.getElementById('kodeUtama').value;
+
+    if (!tahun || !bidang || !kodeUtama) return;
+
+    showLoading('Memuat data...', 'Mengambil kode bagian');
+
+    google.script.run
+      .withSuccessHandler(function (data) {
+        hideLoading();
+        kodeBagianData = data;
+        const select = document.getElementById('kodeBagian');
+        select.innerHTML = '<option value="">Pilih Kode Rekening Bagian</option>';
+
+        data.forEach(item => {
+          const option = document.createElement('option');
+          option.value = item.kodeBagian;
+          option.textContent = `${item.kodeBagian} - ${item.uraian}`;
+          option.setAttribute('data-uraian', item.uraian);
+          option.setAttribute('data-nilai', item.nilai);
+          select.appendChild(option);
+        });
+      })
+      .withFailureHandler(function (error) {
+        hideLoading();
+        showError('Gagal memuat kode bagian: ' + error.message);
+      })
+      .getAnggaranByKodeUtama(tahun, bidang, kodeUtama);
+  }
+
+  function loadUraianDanSisaPagu() {
+    const tahun = document.getElementById('tahunAnggaran').value;
+    const bidang = document.getElementById('bidang').value;
+    const kodeUtama = document.getElementById('kodeUtama').value;
+    const kodeBagian = document.getElementById('kodeBagian').value;
+
+    if (!tahun || !bidang || !kodeUtama || !kodeBagian) return;
+
+    // Set uraian
+    const selectedOption = document.querySelector(`#kodeBagian option[value="${kodeBagian}"]`);
+    if (selectedOption) {
+      document.getElementById('uraianKegiatan').value = selectedOption.getAttribute('data-uraian');
+    }
+
+    // Get sisa pagu
+    showLoading('Menghitung...', 'Memeriksa sisa pagu');
+
+    google.script.run
+      .withSuccessHandler(function (data) {
+        hideLoading();
+        document.getElementById('totalPagu').value = formatRupiah(data.totalPagu);
+        document.getElementById('terpakai').value = formatRupiah(data.totalRealisasi);
+        document.getElementById('sisaPagu').value = formatRupiah(data.sisaPagu);
+      })
+      .withFailureHandler(function (error) {
+        hideLoading();
+        showError('Gagal memuat sisa pagu: ' + error.message);
+      })
+      .getSisaPagu(tahun, bidang, kodeUtama, kodeBagian);
+  }
+
+  function checkPaguValidation() {
+    const nominal = Number(document.getElementById('nominal').value) || 0;
+    const sisaPaguText = document.getElementById('sisaPagu').value;
+    const sisaPagu = Number(sisaPaguText.replace(/[^0-9]/g, ''));
+
+    const warning = document.getElementById('nominalWarning');
+
+    if (nominal > sisaPagu && sisaPagu > 0) {
+      warning.style.display = 'block';
+    } else {
+      warning.style.display = 'none';
+    }
+  }
+
+  function addPajakItem() {
+    const container = document.getElementById('pajakContainer');
+    const index = container.children.length;
+
+    const pajakItem = document.createElement('div');
+    pajakItem.className = 'pajak-item';
+    pajakItem.innerHTML = `
+      <div class="row align-items-center">
+        <div class="col-md-3">
+          <label class="form-label">Jenis Pajak</label>
+          <select class="form-select pajak-jenis" required>
+            <option value="">Pilih Jenis</option>
+            <option value="PPh 21">PPh 21</option>
+            <option value="PPh 22">PPh 22</option>
+            <option value="PPh 23">PPh 23</option>
+            <option value="PPN">PPN</option>
+            <option value="Pasal 4 Ayat 2">Pasal 4 Ayat 2</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">ID Billing</label>
+          <input type="text" class="form-control pajak-billing" placeholder="Contoh: 12345" required>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Nilai (Rp)</label>
+          <input type="number" class="form-control pajak-nilai" placeholder="0" required oninput="updateTotalPajak()">
+        </div>
+        <div class="col-md-3">
+          <button type="button" class="btn btn-remove-pajak mt-4" onclick="removePajakItem(this)">
+            <i class="bi bi-trash"></i> Hapus
+          </button>
+        </div>
+      </div>
+    `;
+
+    container.appendChild(pajakItem);
+  }
+
+  function removePajakItem(button) {
+    button.closest('.pajak-item').remove();
+    updateTotalPajak();
+  }
+
+  function updateTotalPajak() {
+    const nilaiInputs = document.querySelectorAll('.pajak-nilai');
+    let total = 0;
+
+    nilaiInputs.forEach(input => {
+      total += Number(input.value) || 0;
+    });
+
+    document.getElementById('totalPajakDisplay').textContent = formatRupiah(total);
+  }
+
+  function previewFile(input) {
+    const file = input.files[0];
+    const preview = document.getElementById('filePreview');
+
+    if (file) {
+      const fileName = file.name;
+      const fileSize = (file.size / 1024 / 1024).toFixed(2);
+      const fileType = file.type;
+
+      preview.style.display = 'block';
+      preview.innerHTML = `
+        <strong>File Terpilih:</strong><br>
+        📄 ${fileName}<br>
+        📏 Ukuran: ${fileSize} MB<br>
+        📋 Tipe: ${fileType}
+      `;
+    }
+  }
+
+  function handleUploadSPJ() {
+    // Validate form
+    const formData = getFormData();
+    const validation = validateForm(formData);
+
+    if (!validation.valid) {
+      showValidationErrors(validation.errors);
+      return;
+    }
+
+    // Show confirmation
+    Swal.fire({
+      title: 'Konfirmasi Upload',
+      html: `
+        <div style="text-align: left;">
+          <strong>Apakah Anda yakin ingin mengupload SPJ ini?</strong><br><br>
+          <table style="width:100%; border-collapse: collapse;">
+            <tr><td style="padding:5px; width:40%;"><strong>Nomor SPM</strong></td><td style="padding:5px;">: ${formData.nomorSPM}</td></tr>
+            <tr><td style="padding:5px;"><strong>Kegiatan</strong></td><td style="padding:5px;">: ${formData.namaKegiatan}</td></tr>
+            <tr><td style="padding:5px;"><strong>Nominal</strong></td><td style="padding:5px;">: ${formatRupiah(formData.nominal)}</td></tr>
+            <tr><td style="padding:5px;"><strong>Penerima</strong></td><td style="padding:5px;">: ${formData.penerima}</td></tr>
+            <tr><td style="padding:5px;"><strong>Total Pajak</strong></td><td style="padding:5px;">: ${formatRupiah(formData.totalPajak)}</td></tr>
+          </table>
+        </div>
+      `,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'Ya, Upload!',
+      cancelButtonText: 'Batal',
+      reverseButtons: true
+    }).then((result) => {
+      if (result.isConfirmed) {
+        processUpload(formData);
+      }
+    });
+  }
+
+  function getFormData() {
+    return {
+      tahun: document.getElementById('tahunAnggaran').value,
+      bulan: document.getElementById('bulan').value,
+      bidang: document.getElementById('bidang').value,
+      nomorSPM: document.getElementById('nomorSPM').value,
+      kodeRekeningUtama: document.getElementById('kodeUtama').value,
+      kodeRekeningBagian: document.getElementById('kodeBagian').value,
+      uraianKegiatan: document.getElementById('uraianKegiatan').value,
+      namaKegiatan: document.getElementById('namaKegiatan').value,
+      kategori: document.getElementById('kategori').value,
+      nominal: document.getElementById('nominal').value,
+      penerima: document.getElementById('penerima').value,
+      file: document.getElementById('fileInput').files[0],
+      pajakList: getPajakList()
+    };
+  }
+
+  function getPajakList() {
+    const pajakItems = document.querySelectorAll('.pajak-item');
+    const list = [];
+
+    pajakItems.forEach(item => {
+      const jenis = item.querySelector('.pajak-jenis').value;
+      const billing = item.querySelector('.pajak-billing').value;
+      const nilai = item.querySelector('.pajak-nilai').value;
+
+      if (jenis && billing && nilai) {
+        list.push({
+          jenis: jenis,
+          idBilling: billing,
+          nilai: nilai
+        });
+      }
+    });
+
+    return list;
+  }
+
+  function validateForm(data) {
+    const errors = [];
+
+    if (!data.tahun) errors.push("Tahun Anggaran wajib diisi");
+    if (!data.bulan) errors.push("Bulan wajib dipilih");
+    if (!data.bidang) errors.push("Bidang wajib dipilih");
+    if (!data.nomorSPM) errors.push("Nomor SPM wajib diisi");
+    if (!data.kodeRekeningUtama) errors.push("Kode Rekening Utama wajib dipilih");
+    if (!data.kodeRekeningBagian) errors.push("Kode Rekening Bagian wajib dipilih");
+    if (!data.namaKegiatan) errors.push("Nama Kegiatan wajib diisi");
+    if (!data.kategori) errors.push("Kategori wajib dipilih");
+    if (!data.nominal || Number(data.nominal) <= 0) errors.push("Nominal harus lebih dari 0");
+    if (!data.penerima) errors.push("Nama Penerima wajib diisi");
+    if (!data.file) errors.push("File SPJ wajib diupload");
+
+    if (data.file) {
+      if (data.file.size > 25 * 1024 * 1024) {
+        errors.push("Ukuran file maksimal 25MB");
+      }
+
+      const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+      if (!allowedTypes.includes(data.file.type)) {
+        errors.push("Format file harus PDF, JPG, atau PNG");
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors: errors
+    };
+  }
+
+  function showValidationErrors(errors) {
+    const alertDiv = document.getElementById('uploadAlert');
+    alertDiv.className = 'alert-custom alert-danger';
+    alertDiv.style.display = 'block';
+    alertDiv.innerHTML = `
+      <strong><i class="bi bi-exclamation-triangle"></i> Validasi Gagal!</strong><br>
+      <ul style="margin-top: 10px; margin-bottom: 0;">
+        ${errors.map(err => `<li>${err}</li>`).join('')}
+      </ul>
+    `;
+
+    // Scroll to alert
+    alertDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function processUpload(data) {
+    // Show loading
+    showLoading('Mengupload SPJ...', 'Sedang memproses data dan file');
+    updateProgress(10);
+
+    // Read file as base64
+    const reader = new FileReader();
+    reader.onload = function (e) {
+      updateProgress(30);
+
+      const base64Data = e.target.result.split(',')[1];
+
+      const uploadData = {
+        tahun: data.tahun,
+        bulan: data.bulan,
+        bidang: data.bidang,
+        nomorSPM: data.nomorSPM,
+        kodeRekeningUtama: data.kodeRekeningUtama,
+        kodeRekeningBagian: data.kodeRekeningBagian,
+        namaKegiatan: data.namaKegiatan,
+        kategori: data.kategori,
+        nominal: data.nominal,
+        penerima: data.penerima,
+        fileData: base64Data,
+        fileName: data.file.name,
+        mimeType: data.file.type,
+        fileSize: data.file.size,
+        pajakList: data.pajakList,
+        uploader: currentUser.nama
+      };
+
+      updateProgress(50);
+
+      // Call server with session token
+      google.script.run
+        .withSuccessHandler(function (response) {
+          hideLoading();
+          if (response.success) {
+            showSuccess(response.message);
+            resetForm();
+          } else {
+            if (response.validationError) {
+              showValidationErrors(response.errors);
+            } else if (response.unauthorized) {
+              showError(response.message);
+              handleLogout(); // Auto logout if unauthorized
+            } else {
+              showError(response.message);
+            }
+          }
+        })
+        .withFailureHandler(function (error) {
+          hideLoading();
+          showError('Terjadi kesalahan: ' + error.message);
+        })
+        .uploadFileWithPajak(uploadData, sessionToken);
+    };
+
+    reader.readAsDataURL(data.file);
+  }
+
+  function resetForm() {
+    document.getElementById('uploadForm').reset();
+    document.getElementById('filePreview').style.display = 'none';
+    document.getElementById('pajakContainer').innerHTML = '';
+    document.getElementById('totalPagu').value = '';
+    document.getElementById('terpakai').value = '';
+    document.getElementById('sisaPagu').value = '';
+    document.getElementById('uraianKegiatan').value = '';
+    document.getElementById('totalPajakDisplay').textContent = 'Rp 0';
+    document.getElementById('uploadAlert').style.display = 'none';
+  }
+
+  // SEARCH FUNCTIONS
+  function loadAllArsip() {
+    resetSearch(false); // Reset but don't clear the call
+    performSearch(true); // true means "all"
+  }
+
+  function resetSearch(trigger = true) {
+    document.getElementById('searchTahun').value = "";
+    document.getElementById('searchBulan').value = "";
+    document.getElementById('searchSpm').value = "";
+    document.getElementById('searchKegiatan').value = "";
+
+    if (currentUser && currentUser.role === 'Admin') {
+      document.getElementById('searchBidang').value = "ALL";
+    }
+
+    if (trigger) {
+      document.getElementById('searchResults').innerHTML = `
+        <div class="text-center text-muted py-5">
+           <i class="bi bi-search fs-1 d-block mb-3"></i>
+           Tidak ada data ditemukan
+        </div>
+      `;
+    }
+  }
+
+  function performSearch(isAll = false) {
+    const filters = isAll ? { all: true } : {
+      tahun: document.getElementById('searchTahun')?.value || "",
+      bulan: document.getElementById('searchBulan')?.value || "",
+      bidang: document.getElementById('searchBidang')?.value || "ALL",
+      nomorSpm: document.getElementById('searchSpm')?.value || "",
+      namaKegiatan: document.getElementById('searchKegiatan')?.value || ""
+    };
+
+    console.log('Performing lookup with filters:', filters);
+
+    showLoading('Mencari data...', 'Memproses pencarian');
+
+    google.script.run
+      .withSuccessHandler(function (response) {
+        hideLoading();
+        console.log('Search response:', response);
+        if (response.success === false && response.unauthorized) {
+          showError(response.message);
+          handleLogout();
+          return;
+        }
+
+        displaySearchResults(response);
+      })
+      .withFailureHandler(function (error) {
+        hideLoading();
+        console.error('Search failed:', error);
+        showError('Gagal memuat hasil pencarian: ' + error.message);
+      })
+      .searchData(filters, sessionToken);
+  }
+
+  function displaySearchResults(data) {
+    const container = document.getElementById('searchResults');
+    if (!container) return;
+
+    console.log('Displaying results:', data);
+
+    // Standardize isAdmin check
+    const role = String(currentUser?.role || "").trim().toLowerCase();
+    const isAdmin = role === 'admin';
+
+    if (!data || !data.results || data.results.length === 0) {
+      console.warn('No results to display');
+      container.innerHTML = `
+        <div class="alert alert-warning py-4 text-center border-dashed">
+          <i class="bi bi-exclamation-triangle fs-1 d-block mb-2"></i>
+          Data tidak ditemukan atau filter tidak sesuai.
+        </div>
+      `;
+      return;
+    }
+
+    try {
+      // Safe stats calculation
+      const count = (data.stats && data.stats.count) || (data.results ? data.results.length : 0);
+      const totalNominal = (data.stats && data.stats.totalNominal) || 0;
+
+      let html = `
+      <div class="alert alert-info py-2 shadow-sm border-0 d-flex justify-content-between align-items-center">
+        <div>
+          <strong>Hasil:</strong> ${count} dokumen | Total: <span class="text-primary fw-bold">${formatRupiah(totalNominal)}</span>
+        </div>
+      </div>
+      
+      <div class="table-responsive card border-0 shadow-sm p-3">
+        <table id="searchTable" class="table table-hover align-middle" style="width:100%">
+          <thead class="table-light">
+            <tr>
+              <th width="40">No</th>
+              <th>Nomor SPM</th>
+              <th>Nama Kegiatan</th>
+              <th class="text-end">Nominal</th>
+              <th>Bidang</th>
+              <th width="200" class="text-center">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+      data.results.forEach((item, index) => {
+        html += `
+        <tr>
+          <td>${index + 1}</td>
+          <td class="fw-bold"><code>${item.nomorSPM}</code></td>
+          <td>${item.namaKegiatan}</td>
+          <td class="text-end fw-bold text-success">${formatRupiah(item.nominal)}</td>
+          <td><span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2">${item.bidang}</span></td>
+          <td>
+            <div class="d-flex justify-content-center gap-1">
+              <button class="btn btn-primary btn-sm rounded-pill" title="Lihat SPJ" onclick="viewDetail('${item.id}')">
+                <i class="bi bi-eye"></i>
+              </button>
+              <button class="btn btn-info btn-sm rounded-pill text-white" title="Buka Drive" onclick="openFolder('${item.folderUrl}')">
+                <i class="bi bi-google"></i>
+              </button>
+              ${isAdmin ? `
+                <button class="btn btn-warning btn-sm rounded-pill text-white" title="Edit" onclick="editArsip('${item.id}')">
+                  <i class="bi bi-pencil"></i>
+                </button>
+                <button class="btn btn-danger btn-sm rounded-pill" title="Hapus" onclick="deleteArsip('${item.id}')">
+                  <i class="bi bi-trash"></i>
+                </button>
+              ` : ''}
+            </div>
+          </td>
+        </tr>
+      `;
+      });
+
+      html += `
+          </tbody>
+        </table>
+      </div>
+    `;
+
+      // CRITICAL: Set the innerHTML inside the try block
+      container.innerHTML = html;
+
+      // Initialize DataTable with 25 items per page
+      if (typeof $.fn.DataTable !== 'undefined') {
+        $('#searchTable').DataTable({
+          pageLength: 25,
+          lengthMenu: [[10, 25, 50, 100], [10, 25, 50, 100]],
+          responsive: true,
+          order: [[1, 'desc']], // Default order by SPM
+          language: {
+            search: "Filter cepat:",
+            lengthMenu: "Tampilkan _MENU_ data",
+            info: "Menampilkan _START_ sampai _END_ dari _TOTAL_ data"
+          }
+        });
+      }
+
+    } catch (err) {
+      console.error('Rendering error:', err);
+      // Fallback display if table fails
+      container.innerHTML = `
+        <div class="alert alert-danger mb-3">
+          Gagal merender tampilan premium. Menampilkan data standar:
+        </div>
+        <ul class="list-group">
+          ${data.results.map(item => `<li class="list-group-item">${item.nomorSPM} - ${item.namaKegiatan} (Rp ${item.nominal})</li>`).join('')}
+        </ul>
+      `;
+    }
+  }
+
+  function editArsip(id) {
+    Swal.fire({
+      title: 'Edit Data Arsip',
+      text: 'Fitur edit sedang dikembangkan untuk sinkronisasi database.',
+      icon: 'info'
+    });
+  }
+
+  function deleteArsip(id) {
+    Swal.fire({
+      title: 'Hapus Data?',
+      text: "Data arsip dan file di drive akan dihapus secara permanen!",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: 'Ya, Hapus!',
+      cancelButtonText: 'Batal'
+    }).then((result) => {
+      if (result.isConfirmed) {
+        showLoading('Menghapus...', 'Sedang memproses penghapusan data');
+        google.script.run
+          .withSuccessHandler(function (response) {
+            hideLoading();
+            if (response.success) {
+              showSuccess(response.message);
+              performSearch(); // Refresh list
+            } else {
+              showError(response.message);
+            }
+          })
+          .deleteArsipData(id, sessionToken);
+      }
+    });
+  }
+
+  function viewDetail(id) {
+    Swal.fire({
+      title: 'Detail SPJ',
+      html: 'Loading...',
+      didOpen: () => {
+        Swal.showLoading();
+
+        google.script.run
+          .withSuccessHandler(function (detail) {
+            if (!detail) {
+              Swal.close();
+              showError('Data tidak ditemukan');
+              return;
+            }
+
+            Swal.update({
+              html: `
+                <div style="text-align: left;">
+                  <p><strong>Nomor SPM:</strong> ${detail.nomorSPM}</p>
+                  <p><strong>Kegiatan:</strong> ${detail.namaKegiatan}</p>
+                  <p><strong>Nominal:</strong> ${formatRupiah(detail.nominal)}</p>
+                  <p><strong>Penerima:</strong> ${detail.penerima}</p>
+                  <p><strong>Bidang:</strong> ${detail.bidang}</p>
+                  <p><strong>Tanggal Upload:</strong> ${detail.tanggalUpload}</p>
+                  <p><strong>Uploader:</strong> ${detail.uploader}</p>
+                  <p><strong>Total Pajak:</strong> ${formatRupiah(detail.totalPajak)}</p>
+                </div>
+              `,
+              showConfirmButton: true,
+              confirmButtonText: 'Tutup'
+            });
+          })
+          .withFailureHandler(function (error) {
+            Swal.close();
+            showError('Gagal memuat detail: ' + error.message);
+          })
+          .getSpjDetail(id);
+      }
+    });
+  }
+
+  function downloadFile(url) {
+    window.open(url, '_blank');
+  }
+
+  function openFolder(url) {
+    if (url) {
+      window.open(url, '_blank');
+    } else {
+      showError('Folder tidak ditemukan');
+    }
+  }
+
+  function exportSearchResults() {
+    const filters = {
+      tahun: document.getElementById('searchTahun').value,
+      bulan: document.getElementById('searchBulan').value,
+      bidang: document.getElementById('searchBidang').value,
+      keyword: document.getElementById('searchKeyword').value
+    };
+
+    showLoading('Exporting...', 'Membuat file Excel');
+
+    google.script.run
+      .withSuccessHandler(function (url) {
+        hideLoading();
+        if (typeof url === 'string') {
+          Swal.fire({
+            title: 'Export Berhasil!',
+            html: `<a href="${url}" target="_blank" class="btn btn-success">Download Excel</a>`,
+            showConfirmButton: false,
+            timer: 5000
+          });
+        } else {
+          showError(url.message || 'Gagal export');
+        }
+      })
+      .withFailureHandler(function (error) {
+        hideLoading();
+        showError('Gagal export: ' + error.message);
+      })
+      .exportSearchExcel(filters, sessionToken);
+  }
+
+  // DASHBOARD FUNCTIONS
+  function loadDashboard() {
+    const year = new Date().getFullYear();
+
+    showLoading('Memuat dashboard...', 'Mengambil data statistik');
+
+    google.script.run
+      .withSuccessHandler(function (data) {
+        hideLoading();
+        if (data.success === false && data.unauthorized) {
+          showError(data.message);
+          handleLogout();
+          return;
+        }
+
+        updateDashboard(data);
+      })
+      .withFailureHandler(function (error) {
+        hideLoading();
+        showError('Gagal memuat dashboard: ' + error.message);
+      })
+      .getSpjStatistics(year.toString(), sessionToken);
+  }
+
+  function updateDashboard(data) {
+    // Update cards
+    document.getElementById('totalSpj').textContent = data.results ? data.results.length : 0;
+    document.getElementById('totalNominal').textContent = formatRupiah(data.total || 0);
+    document.getElementById('avgPerMonth').textContent = formatRupiah(Math.round((data.total || 0) / 12));
+
+    // Find highest month
+    if (data.monthly && data.monthly.length > 0) {
+      const maxVal = Math.max(...data.monthly);
+      const maxIdx = data.monthly.indexOf(maxVal);
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Ags", "Sep", "Okt", "Nov", "Des"];
+      document.getElementById('highestMonth').textContent = `${monthNames[maxIdx]} - ${formatRupiah(maxVal)}`;
+    }
+
+    // Update charts
+    updateMonthlyChart(data.monthly || []);
+    updateBidangChart(data.bidang || {});
+  }
+
+  function updateMonthlyChart(monthlyData) {
+    const ctx = document.getElementById('monthlyChart').getContext('2d');
+
+    // Destroy existing chart if exists
+    if (window.monthlyChart) {
+      window.monthlyChart.destroy();
+    }
+
+    window.monthlyChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Ags", "Sep", "Okt", "Nov", "Des"],
+        datasets: [{
+          label: 'Realisasi (Rp)',
+          data: monthlyData,
+          borderColor: '#4361ee',
+          backgroundColor: 'rgba(67, 97, 238, 0.1)',
+          tension: 0.4,
+          fill: true
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: true
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              callback: function (value) {
+                return 'Rp ' + value.toLocaleString('id-ID');
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function updateBidangChart(bidangData) {
+    const ctx = document.getElementById('bidangChart').getContext('2d');
+
+    // Destroy existing chart if exists
+    if (window.bidangChart) {
+      window.bidangChart.destroy();
+    }
+
+    const labels = Object.keys(bidangData);
+    const values = Object.values(bidangData);
+
+    window.bidangChart = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: values,
+          backgroundColor: ['#4361ee', '#3f37c9', '#4895ef', '#4cc9f0'],
+          borderWidth: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'bottom'
+          }
+        }
+      }
+    });
+  }
+
+  function exportDashboardToPDF() {
+    showLoading('Exporting...', 'Membuat PDF Dashboard');
+
+    // Use jsPDF and html2canvas
+    const { jsPDF } = window.jspdf;
+
+    const dashboardElement = document.querySelector('#dashboardSection');
+
+    html2canvas(dashboardElement, {
+      scale: 2,
+      useCORS: true,
+      logging: false
+    }).then(canvas => {
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+
+      // Add header
+      pdf.setFontSize(16);
+      pdf.text('Dashboard Statistik - Arsip SPJ Digital', 105, 15, null, null, 'center');
+      pdf.setFontSize(10);
+      pdf.text(`Dicetak pada: ${new Date().toLocaleDateString('id-ID')}`, 105, 22, null, null, 'center');
+      pdf.setLineWidth(0.5);
+      pdf.line(10, 25, 200, 25);
+
+      // Add content
+      const imgWidth = 190;
+      const imgHeight = canvas.height * imgWidth / canvas.width;
+      pdf.addImage(imgData, 'PNG', 10, 30, imgWidth, imgHeight);
+
+      // Add footer
+      const pageCount = pdf.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        pdf.setPage(i);
+        pdf.setFontSize(8);
+        pdf.setTextColor(150);
+        pdf.text('Arsip SPJ Digital v8.1 - Bappedalitbang Paser', 105, 285, null, null, 'center');
+      }
+
+      hideLoading();
+
+      // Save PDF
+      pdf.save(`Dashboard_SPJ_${new Date().getTime()}.pdf`);
+
+      showSuccess('PDF berhasil dibuat!');
+    }).catch(error => {
+      hideLoading();
+      showError('Gagal membuat PDF: ' + error.message);
+    });
+  }
+
+  // LOADING FUNCTIONS
+  function showLoading(text, subtext) {
+    document.getElementById('loadingText').textContent = text || 'Sedang Memproses...';
+    document.getElementById('loadingSubtext').textContent = subtext || 'Mohon tunggu sebentar';
+    document.getElementById('loadingOverlay').style.display = 'flex';
+  }
+
+  function hideLoading() {
+    document.getElementById('loadingOverlay').style.display = 'none';
+  }
+
+  function updateProgress(percentage) {
+    document.getElementById('loadingProgress').style.width = percentage + '%';
+  }
+
+  // ALERT FUNCTIONS
+  function showSuccess(message) {
+    Swal.fire({
+      icon: 'success',
+      title: 'Berhasil!',
+      text: message,
+      timer: 3000,
+      showConfirmButton: false
+    });
+  }
+
+  function showError(message) {
+    Swal.fire({
+      icon: 'error',
+      title: 'Gagal!',
+      text: message,
+      timer: 5000,
+      showConfirmButton: true
+    });
+  }
+
+  // UTILITY FUNCTIONS
+  function formatRupiah(angka) {
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      minimumFractionDigits: 0
+    }).format(angka);
+  }
+
+  // --- FEATURE-SPECIFIC LOADING FUNCTIONS ---
+
+  function loadPaguList() {
+    const filters = {
+      tahun: document.getElementById('searchTahun')?.value || "",
+      bidang: document.getElementById('searchBidang')?.value || "ALL",
+      onlyActive: true
+    };
+
+    const container = document.getElementById('paguResults');
+    if (!container) return;
+
+    showLoading('Memuat Anggaran...', 'Mengambil data pagu anggaran');
+
+    google.script.run
+      .withSuccessHandler(function (response) {
+        hideLoading();
+        if (response.success === false) {
+          showError(response.message);
+          return;
+        }
+        renderPaguTable(response.results, container);
+      })
+      .withFailureHandler(function (error) {
+        hideLoading();
+        showError('Gagal memuat pagu: ' + error.message);
+      })
+      .getPaguData(filters, sessionToken);
+  }
+
+  function renderPaguTable(data, container) {
+    if (!data || data.length === 0) {
+      container.innerHTML = '<div class="alert alert-warning">Tidak ada data anggaran ditemukan.</div>';
+      return;
+    }
+
+    let html = `
+      <div class="table-responsive">
+        <table id="paguTable" class="table table-sm table-striped table-bordered mt-3">
+          <thead class="table-dark">
+            <tr>
+              <th>No</th>
+              <th>Kode</th>
+              <th>Uraian</th>
+              <th>Jenis</th>
+              <th>Bidang</th>
+              <th>Nilai Pagu</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    data.forEach((item, index) => {
+      html += `
+        <tr>
+          <td>${index + 1}</td>
+          <td><code>${item.kodeUtama}.${item.kodeBagian}</code></td>
+          <td>${item.uraian}</td>
+          <td><span class="badge bg-secondary">${item.jenis}</span></td>
+          <td>${item.bidang}</td>
+          <td class="text-end fw-bold">${formatRupiah(item.nilai)}</td>
+        </tr>
+      `;
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+
+    $('#paguTable').DataTable({ pageLength: 25 });
+  }
+
+  function loadReportRealisasi() {
+    const filters = {
+      tahun: document.getElementById('searchTahun')?.value || new Date().getFullYear().toString(),
+      bidang: document.getElementById('searchBidang')?.value || "ALL"
+    };
+
+    const container = document.getElementById('realisasiResults');
+    if (!container) return;
+
+    showLoading('Menghitung Realisasi...', 'Memproses data transaksi');
+
+    google.script.run
+      .withSuccessHandler(function (response) {
+        hideLoading();
+        renderRealisasiTable(response, container);
+      })
+      .withFailureHandler(function (error) {
+        hideLoading();
+        showError('Gagal memuat laporan: ' + error.message);
+      })
+      .getRealisasiData(filters, sessionToken);
+  }
+
+  function renderRealisasiTable(data, container) {
+    // Backend returns { detail: [], summary: {}... }
+    const details = data.detail || (Array.isArray(data) ? data : []);
+
+    if (!details || details.length === 0) {
+      container.innerHTML = '<div class="alert alert-warning">Tidak ada data realisasi untuk kriteria ini.</div>';
+      return;
+    }
+
+    let html = `
+      <div class="table-responsive">
+        <table id="realisasiTable" class="table table-sm table-striped table-bordered mt-3">
+          <thead class="table-dark">
+            <tr>
+              <th>Kode Rekening</th>
+              <th>Uraian</th>
+              <th>Pagu</th>
+              <th>Realisasi</th>
+              <th>Sisa</th>
+              <th>%</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    details.forEach(item => {
+      const pagu = item.pagu || 0;
+      const realisasi = item.realisasi_total || 0;
+      const sisa = item.saldo || 0;
+      const persen = item.persen || 0;
+      const badgeColor = persen > 90 ? 'bg-danger' : (persen > 50 ? 'bg-warning' : 'bg-success');
+
+      html += `
+        <tr>
+          <td><code>${item.kode_rekening}</code></td>
+          <td>${item.uraian}</td>
+          <td class="text-end">${formatRupiah(pagu)}</td>
+          <td class="text-end text-primary fw-bold">${formatRupiah(realisasi)}</td>
+          <td class="text-end ${sisa < 0 ? 'text-danger' : ''}">${formatRupiah(sisa)}</td>
+          <td class="text-center"><span class="badge ${badgeColor}">${persen}%</span></td>
+        </tr>
+      `;
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+  }
+
+  function loadReportPajak() {
+    const filters = {
+      tahun: document.getElementById('searchTahun')?.value || "",
+      bidang: document.getElementById('searchBidang')?.value || "ALL"
+    };
+
+    const container = document.getElementById('pajakResults');
+    if (!container) return;
+
+    showLoading('Memuat Data Pajak...', 'Mengambil rekapitulasi pajak');
+
+    google.script.run
+      .withSuccessHandler(function (response) {
+        hideLoading();
+        // Backend returns { list: [], summary: {}... }
+        renderPajakTable(response.list || [], container);
+      })
+      .withFailureHandler(function (error) {
+        hideLoading();
+        showError('Gagal memuat rekap pajak: ' + error.message);
+      })
+      .getRekapPajakEnhanced(filters, sessionToken);
+  }
+
+  function renderPajakTable(data, container) {
+    if (!data || data.length === 0) {
+      container.innerHTML = '<div class="alert alert-warning">Tidak ada data pajak ditemukan.</div>';
+      return;
+    }
+
+    let html = `
+      <div class="table-responsive">
+        <table id="pajakTable" class="table table-sm table-striped table-bordered mt-3">
+          <thead class="table-dark">
+            <tr>
+              <th>No</th>
+              <th>Bulan</th>
+              <th>Nomor SPM</th>
+              <th>Jenis Pajak</th>
+              <th>ID Billing</th>
+              <th>Nominal</th>
+              <th>Bidang</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    data.forEach((item, index) => {
+      html += `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${item.bulan}</td>
+          <td>${item.no_spm || '-'}</td>
+          <td><span class="badge bg-info text-dark">${item.jenis_pajak}</span></td>
+          <td><code>${item.id_billing}</code></td>
+          <td class="text-end fw-bold text-success">${formatRupiah(item.nilai)}</td>
+          <td>${item.bidang}</td>
+        </tr>
+      `;
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+
+    $('#pajakTable').DataTable({ pageLength: 25 });
+  }
+</script>

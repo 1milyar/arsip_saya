@@ -1,0 +1,62 @@
+<!-- Search Section -->
+<section id="searchSection" class="app-section">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-search text-primary"></i> Cari & Kelola Arsip</h2>
+  </div>
+
+  <div class="card card-custom p-4 mb-4 shadow-sm border-0">
+    <div class="row g-2 mb-3">
+      <div class="col-md-2">
+        <select id="searchTahun" class="form-select">
+          <option value="">Semua Tahun</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <select id="searchBulan" class="form-select">
+          <option value="">Semua Bulan</option>
+          <option value="Januari">Januari</option>
+          <option value="Februari">Februari</option>
+          <option value="Maret">Maret</option>
+          <option value="April">April</option>
+          <option value="Mei">Mei</option>
+          <option value="Juni">Juni</option>
+          <option value="Juli">Juli</option>
+          <option value="Agustus">Agustus</option>
+          <option value="September">September</option>
+          <option value="Oktober">Oktober</option>
+          <option value="November">November</option>
+          <option value="Desember">Desember</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <input type="text" id="searchSpm" class="form-control" placeholder="Nomor SPM">
+      </div>
+      <div class="col-md-3">
+        <input type="text" id="searchKegiatan" class="form-control" placeholder="Nama Kegiatan">
+      </div>
+      <div class="col-md-3">
+        <select id="searchBidang" class="form-select">
+          <option value="ALL">Semua Bidang</option>
+        </select>
+      </div>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-primary px-4" onclick="performSearch()">
+        <i class="bi bi-search"></i> Cari
+      </button>
+      <button class="btn btn-secondary px-4" onclick="loadAllArsip()">
+        <i class="bi bi-card-list"></i> Tampilkan Semua
+      </button>
+      <button class="btn btn-danger px-4" onclick="resetSearch()">
+        <i class="bi bi-trash"></i> Reset
+      </button>
+    </div>
+  </div>
+
+  <div id="searchResults" class="mt-4">
+    <div class="text-center text-muted py-5">
+      <i class="bi bi-search fs-1 d-block mb-3"></i>
+      Tidak ada data ditemukan
+    </div>
+  </div>
+</section>
