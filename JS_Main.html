@@ -262,46 +262,54 @@
     document.getElementById('sessionMinutes').textContent = minutes;
   }
 
-  // NAVIGATION FUNCTIONS
-  function showSection(sectionId) {
-    console.log('Showing section:', sectionId);
+  // === PERBAIKAN 1: showSection ===
+function showSection(sectionId) {
+  console.log('Showing section:', sectionId);
 
-    // Hide ALL sections explicitly using the app-section class
-    document.querySelectorAll('.app-section').forEach(el => {
-      el.classList.remove('active');
-    });
+  // Hide ALL sections explicitly using the app-section class
+  document.querySelectorAll('.app-section').forEach(el => {
+    el.classList.remove('active');
+  });
 
-    // Remove active from all nav links
-    document.querySelectorAll('.nav-link').forEach(link => {
-      link.classList.remove('active');
-    });
+  // Remove active from all nav links
+  document.querySelectorAll('.nav-link').forEach(link => {
+    link.classList.remove('active');
+  });
 
-    // Show selected section
-    const targetSection = document.getElementById(sectionId + 'Section');
-    if (targetSection) {
-      targetSection.classList.add('active');
-    } else {
-      console.error('Section element not found:', sectionId + 'Section');
-    }
-
-    // Add active to nav link
-    const activeLink = document.querySelector(`[data-section="${sectionId}"]`);
-    if (activeLink) activeLink.classList.add('active');
-
-    // Load section data if needed
-    if (sectionId === 'search') {
-      document.getElementById('searchResults').innerHTML = ''; // Clear old results
-      performSearch();
-    } else if (sectionId === 'dashboard') {
-      loadDashboard();
-    } else if (sectionId === 'anggaran') {
-      loadPaguList();
-    } else if (sectionId === 'realisasi') {
-      loadReportRealisasi();
-    } else if (sectionId === 'rekapPajak') {
-      loadReportPajak();
-    }
+  // Show selected section
+  const targetSection = document.getElementById(sectionId + 'Section');
+  if (targetSection) {
+    targetSection.classList.add('active');
+  } else {
+    console.error('Section element not found:', sectionId + 'Section');
   }
+
+  // Add active to nav link
+  const activeLink = document.querySelector(`[data-section="${sectionId}"]`);
+  if (activeLink) activeLink.classList.add('active');
+
+  // Load section data if needed
+  if (sectionId === 'search') {
+    // ✅ FIX: Tampilkan loading + auto-load semua data
+    document.getElementById('searchResults').innerHTML = `
+      <div class="text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+          <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-3 text-muted">Memuat data arsip...</p>
+      </div>
+    `;
+    loadAllArsip(); // ✅ Auto-load semua data (bukan performSearch kosong)
+  } else if (sectionId === 'dashboard') {
+    loadDashboard();
+  } else if (sectionId === 'anggaran') {
+    loadPaguList();
+  } else if (sectionId === 'realisasi') {
+    loadReportRealisasi();
+  } else if (sectionId === 'rekapPajak') {
+    loadReportPajak();
+  }
+}
 
   // UPLOAD SPJ FUNCTIONS
   function loadKodeUtama() {
@@ -678,64 +686,94 @@
     document.getElementById('uploadAlert').style.display = 'none';
   }
 
-  // SEARCH FUNCTIONS
-  function loadAllArsip() {
-    resetSearch(false); // Reset but don't clear the call
-    performSearch(true); // true means "all"
+  // === PERBAIKAN 2: loadAllArsip ===
+function loadAllArsip() {
+  // ✅ FIX: Reset semua filter dengan benar
+  document.getElementById('searchTahun').value = "";
+  document.getElementById('searchBulan').value = "";
+  document.getElementById('searchSpm').value = "";
+  document.getElementById('searchKegiatan').value = "";
+  
+  // Set bidang ke "ALL" untuk SEMUA user (Admin & non-Admin)
+  const searchBidang = document.getElementById('searchBidang');
+  if (searchBidang) {
+    searchBidang.value = "ALL";
+  }
+  
+  // Tampilkan loading
+  document.getElementById('searchResults').innerHTML = `
+    <div class="text-center py-5">
+      <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+      <p class="mt-3 text-muted">Memuat semua data arsip...</p>
+    </div>
+  `;
+  
+  // ✅ Perform search tanpa filter (all=true)
+  performSearch(true);
+}
+
+  // === PERBAIKAN 3: resetSearch ===
+function resetSearch(trigger = true) {
+  document.getElementById('searchTahun').value = "";
+  document.getElementById('searchBulan').value = "";
+  document.getElementById('searchSpm').value = "";
+  document.getElementById('searchKegiatan').value = "";
+  
+  // ✅ FIX: Set bidang ke "ALL" untuk SEMUA user (tidak hanya Admin)
+  const searchBidang = document.getElementById('searchBidang');
+  if (searchBidang) {
+    searchBidang.value = "ALL";
   }
 
-  function resetSearch(trigger = true) {
-    document.getElementById('searchTahun').value = "";
-    document.getElementById('searchBulan').value = "";
-    document.getElementById('searchSpm').value = "";
-    document.getElementById('searchKegiatan').value = "";
-
-    if (currentUser && currentUser.role === 'Admin') {
-      document.getElementById('searchBidang').value = "ALL";
-    }
-
-    if (trigger) {
-      document.getElementById('searchResults').innerHTML = `
-        <div class="text-center text-muted py-5">
-           <i class="bi bi-search fs-1 d-block mb-3"></i>
-           Tidak ada data ditemukan
-        </div>
-      `;
-    }
+  if (trigger) {
+    document.getElementById('searchResults').innerHTML = `
+      <div class="text-center text-muted py-5">
+        <i class="bi bi-search fs-1 d-block mb-3"></i>
+        <p class="mb-2">Klik "Tampilkan Semua" untuk melihat data</p>
+        <button class="btn btn-primary" onclick="loadAllArsip()">
+          <i class="bi bi-card-list"></i> Tampilkan Semua
+        </button>
+      </div>
+    `;
   }
+}
 
-  function performSearch(isAll = false) {
-    const filters = isAll ? { all: true } : {
-      tahun: document.getElementById('searchTahun')?.value || "",
-      bulan: document.getElementById('searchBulan')?.value || "",
-      bidang: document.getElementById('searchBidang')?.value || "ALL",
-      nomorSpm: document.getElementById('searchSpm')?.value || "",
-      namaKegiatan: document.getElementById('searchKegiatan')?.value || ""
-    };
+  // === PERBAIKAN 4: performSearch ===
+function performSearch(isAll = false) {
+  const filters = isAll ? { all: true } : {
+    tahun: document.getElementById('searchTahun')?.value.trim() || "",
+    bulan: document.getElementById('searchBulan')?.value.trim() || "",
+    bidang: document.getElementById('searchBidang')?.value.trim() || "ALL",
+    nomorSpm: document.getElementById('searchSpm')?.value.trim() || "",
+    namaKegiatan: document.getElementById('searchKegiatan')?.value.trim() || ""
+  };
 
-    console.log('Performing lookup with filters:', filters);
+  console.log('🔍 Performing search with filters:', filters);
 
-    showLoading('Mencari data...', 'Memproses pencarian');
+  showLoading('Mencari data...', 'Memproses pencarian');
 
-    google.script.run
-      .withSuccessHandler(function (response) {
-        hideLoading();
-        console.log('Search response:', response);
-        if (response.success === false && response.unauthorized) {
-          showError(response.message);
-          handleLogout();
-          return;
-        }
+  google.script.run
+    .withSuccessHandler(function (response) {
+      hideLoading();
+      console.log('📊 Search response:', response);
+      
+      if (response.success === false && response.unauthorized) {
+        showError(response.message);
+        handleLogout();
+        return;
+      }
 
-        displaySearchResults(response);
-      })
-      .withFailureHandler(function (error) {
-        hideLoading();
-        console.error('Search failed:', error);
-        showError('Gagal memuat hasil pencarian: ' + error.message);
-      })
-      .searchData(filters, sessionToken);
-  }
+      displaySearchResults(response);
+    })
+    .withFailureHandler(function (error) {
+      hideLoading();
+      console.error('❌ Search failed:', error);
+      showError('Gagal memuat hasil pencarian: ' + error.message);
+    })
+    .searchData(filters, sessionToken);
+}
 
   function displaySearchResults(data) {
     const container = document.getElementById('searchResults');
