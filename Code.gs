@@ -780,7 +780,7 @@ function getArsipHeaderMapping(headers) {
   return mapping;
 }
 
-// === 6. SEARCH DENGAN RBAC FILTER ===
+// === 6. SEARCH DENGAN RBAC FILTER (DIPERBAIKI) ===
 function searchData(filters, sessionToken) {
   try {
     // Validate session
@@ -789,31 +789,31 @@ function searchData(filters, sessionToken) {
     const role = String(user.role || "").trim().toLowerCase();
     const isAdmin = role === 'admin';
     
-    console.log('Search initiated by:', user.nama, 'Role:', user.role, 'Bidang:', user.bidang, 'Filters:', JSON.stringify(filters));
+    console.log('🔍 Search initiated by:', user.nama, 'Role:', user.role, 'Bidang:', user.bidang);
+    console.log('🔍 Filters received:', JSON.stringify(filters));
     
     const sheet = getSheet();
     const data = sheet.getDataRange().getValues();
     const result = [];
     
-    if (data.length <= 1) {
-      return { success: true, results: [], stats: { count: 0, totalNominal: 0 }, message: "Sheet kosong" };
-    }
-
-    const headers = data[0];
-    const col = getArsipHeaderMapping(headers);
-    console.log('Detected column mapping:', JSON.stringify(col));
+    console.log('📊 Total rows in sheet:', data.length);
     
     // Auto-filter by bidang if user is not Admin
     let fBidang = filters.bidang ? String(filters.bidang).trim().toUpperCase() : "ALL";
-    if (user.bidang && user.bidang !== 'ALL' && !isAdmin) {
+    
+    // ✅ FIX: Hanya override bidang jika bukan Admin DAN bukan mode "all"
+    const isAll = filters.all === true;
+    if (user.bidang && user.bidang !== 'ALL' && !isAdmin && !isAll) {
       fBidang = String(user.bidang).trim().toUpperCase();
+      console.log('🔒 Auto-filtering to user bidang:', fBidang);
     }
     
-    const fTahun = filters.tahun ? String(filters.tahun) : "";
-    const fBulan = filters.bulan ? String(filters.bulan) : "";
+    const fTahun = filters.tahun ? String(filters.tahun).trim() : "";
+    const fBulan = filters.bulan ? String(filters.bulan).trim() : "";
     const fNomorSpm = filters.nomorSpm ? String(filters.nomorSpm).toLowerCase().trim() : "";
     const fNamaKegiatan = filters.namaKegiatan ? String(filters.namaKegiatan).toLowerCase().trim() : "";
-    const isAll = filters.all === true;
+    
+    console.log('🔍 Filter values - Bidang:', fBidang, 'Tahun:', fTahun, 'Bulan:', fBulan, 'IsAll:', isAll);
     
     const stats = {
       count: 0,
@@ -825,41 +825,54 @@ function searchData(filters, sessionToken) {
     
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
-      // Skip only completely empty rows
-      if (row.every(cell => String(cell).trim() === "")) continue;
       
-      const valTahun = String(row[col.tahun] || "");
-      const valBulan = String(row[col.bulan] || "");
-      const valSpm = String(row[col.nomorSPM] || "").toLowerCase();
-      const valKeg = String(row[col.namaKegiatan] || "").toLowerCase();
-      const rowBidang = String(row[col.bidang] || "").trim().toUpperCase();
-
+      // ✅ FIX: Skip empty or malformed rows
+      if (!row[0] || (String(row[3] || "").trim() === '' && String(row[4] || "").trim() === '')) continue;
+      
+      // FILTER LOGIC - Bypass ALL filters when isAll=true
       if (!isAll) {
-        if (fTahun && valTahun !== fTahun) continue;
-        if (fBulan && valBulan !== fBulan) continue;
-        if (fNomorSpm && !valSpm.includes(fNomorSpm)) continue;
-        if (fNamaKegiatan && !valKeg.includes(fNamaKegiatan)) continue;
+        // Filter by tahun
+        if (fTahun && String(row[1] || "").trim() !== fTahun) continue;
+        
+        // Filter by bulan
+        if (fBulan && String(row[2] || "").trim() !== fBulan) continue;
+        
+        // Filter by Nomor SPM (partial match)
+        if (fNomorSpm && !String(row[3] || "").toLowerCase().includes(fNomorSpm)) continue;
+        
+        // Filter by Nama Kegiatan (partial match)
+        if (fNamaKegiatan && !String(row[4] || "").toLowerCase().includes(fNamaKegiatan)) continue;
       }
       
-      if (fBidang && fBidang !== 'ALL' && rowBidang !== fBidang) continue;
+      // ✅ FIX: Only filter by bidang if NOT isAll mode
+      if (!isAll && fBidang && fBidang !== 'ALL') {
+        const rowBidang = String(row[15] || "").trim().toUpperCase();
+        if (rowBidang !== fBidang) continue;
+      }
       
-      const nominal = Number(row[col.nominal]) || 0;
-      
+      const nominal = Number(row[6]) || 0;
       const item = {
-        id: row[col.id],
-        tahun: valTahun,
-        bulan: valBulan,
-        nomorSPM: row[col.nomorSPM],
-        namaKegiatan: row[col.namaKegiatan],
-        kategori: row[col.kategori],
+        id: row[0],
+        tahun: row[1],
+        bulan: row[2],
+        nomorSPM: row[3],
+        namaKegiatan: row[4],
+        kategori: row[5],
         nominal: nominal,
-        penerima: row[col.penerima],
-        fileId: row[col.fileId],
-        fileUrl: row[col.fileUrl],
-        tanggalUpload: row[col.tanggalUpload],
-        uploader: row[col.uploader],
-        bidang: row[col.bidang],
-        folderUrl: row[col.folderUrl] || ""
+        penerima: row[7],
+        fileId: row[8],
+        fileUrl: row[9],
+        tanggalUpload: row[10],
+        uploader: row[11],
+        bidang: row[15],
+        kodeRekeningUtama: row[16],
+        kodeRekeningBagian: row[17],
+        jenisAnggaran: row[18],
+        status: row[19],
+        jenisPajak: row[20],
+        billing: row[21],
+        totalPajak: Number(row[22]) || 0,
+        folderUrl: row[23] || ""
       };
       
       result.push(item);
@@ -871,8 +884,15 @@ function searchData(filters, sessionToken) {
       stats.perBulan[item.bulan] = (stats.perBulan[item.bulan] || 0) + nominal;
     }
     
-    console.log('Search finished. Results found:', result.length);
+    console.log('✅ Search finished. Results found:', result.length, 'Filtered from:', data.length - 1, 'rows');
     
+    if (result.length > 0) {
+      console.log('📋 Sample first result:', JSON.stringify(result[0]).substring(0, 150));
+    } else {
+      console.warn('⚠️ No results found with current filters');
+    }
+    
+    // Sort by date descending
     result.sort((a, b) => {
       const dateA = a.tanggalUpload ? new Date(a.tanggalUpload).getTime() : 0;
       const dateB = b.tanggalUpload ? new Date(b.tanggalUpload).getTime() : 0;
@@ -883,12 +903,17 @@ function searchData(filters, sessionToken) {
       success: true,
       results: result,
       stats: stats,
-      userBidang: user.bidang
+      userBidang: user.bidang,
+      filters: filters
     };
     
   } catch (err) {
-    console.error('Search internal Error:', err.message);
-    return { success: false, message: 'Kesalahan sistem: ' + err.message };
+    console.error('❌ Search internal Error:', err.message, err.stack);
+    return { 
+      success: false, 
+      message: 'Kesalahan sistem: ' + err.message,
+      error: err.toString()
+    };
   }
 }
 
